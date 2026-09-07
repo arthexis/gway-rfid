@@ -1,0 +1,15 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    uses: arthexis/ci-base/.github/workflows/consumer-ci.yml@v1
+    with:
+      install-command: python -m pip install -e ".[dev]"
