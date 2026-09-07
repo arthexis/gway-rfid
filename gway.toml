@@ -1,0 +1,7 @@
+[project]
+name = "rfid"
+aliases = ["gway-rfid"]
+
+[adapter]
+type = "python"
+module = "gway_rfid.commands"
