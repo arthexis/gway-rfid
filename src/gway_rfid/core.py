@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Protocol
 
 
@@ -16,7 +16,7 @@ class Tag:
         return self.uid.hex().upper()
 
     def as_dict(self) -> dict[str, str]:
-        seen_at = self.seen_at or datetime.now(timezone.utc)
+        seen_at = self.seen_at or datetime.now(UTC)
         return {
             "uid": self.uid_hex,
             "reader": self.reader,
