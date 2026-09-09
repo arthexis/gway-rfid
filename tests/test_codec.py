@@ -34,7 +34,9 @@ def test_signed_envelope_round_trip_is_deterministic() -> None:
 def test_tampering_is_rejected_by_signature() -> None:
     private_key = Ed25519PrivateKey.generate()
     command = sign(CommandEnvelope(("device", "examine", "eth0")), private_key)
-    tampered = type(command)(CommandEnvelope(("device", "examine", "wlan0")), command.signature)
+    tampered = type(command)(
+        CommandEnvelope(("device", "examine", "wlan0")), command.signature
+    )
 
     with pytest.raises(SignatureError):
         verify(tampered, private_key.public_key())
@@ -42,7 +44,9 @@ def test_tampering_is_rejected_by_signature() -> None:
 
 def test_json_is_human_interchange_not_wire_encoding() -> None:
     private_key = Ed25519PrivateKey.generate()
-    command = sign(CommandEnvelope(("lcd", "write", "héllo"), issuer="ops"), private_key)
+    command = sign(
+        CommandEnvelope(("lcd", "write", "héllo"), issuer="ops"), private_key
+    )
 
     restored = from_json_dict(to_json_dict(command))
 

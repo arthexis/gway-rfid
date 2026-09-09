@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import struct
+from dataclasses import dataclass
 
 MAGIC = b"GWY1"
 VERSION = 1
@@ -54,9 +54,7 @@ def is_trailer_block(block: int) -> bool:
 
 def payload_blocks() -> tuple[int, ...]:
     return tuple(
-        block
-        for block in range(2, MAX_BLOCK + 1)
-        if not is_trailer_block(block)
+        block for block in range(2, MAX_BLOCK + 1) if not is_trailer_block(block)
     )
 
 

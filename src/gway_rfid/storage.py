@@ -36,7 +36,10 @@ class MemoryBlockTransport:
 
 def read_payload(transport: BlockTransport) -> tuple[CardHeader, bytes]:
     header = CardHeader.decode(transport.read_block(HEADER_BLOCK))
-    chunks = [transport.read_block(block) for block in blocks_for_length(header.payload_length)]
+    chunks = [
+        transport.read_block(block)
+        for block in blocks_for_length(header.payload_length)
+    ]
     if any(len(chunk) != BLOCK_SIZE for chunk in chunks):
         raise CardFormatError("reader returned an invalid block length")
     payload = b"".join(chunks)[: header.payload_length]
