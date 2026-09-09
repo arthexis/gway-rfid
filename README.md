@@ -54,6 +54,8 @@ if tag:
     print(tag.uid_hex)
 ```
 
+PR1 also adds the portable `GWY1` command-card codec, including canonical CBOR envelopes, Ed25519 signatures, and MIFARE Classic 1K block layout helpers.
+
 A backend needs only two basic operations: `scan()` and `status()`. Hardware-specific imports stay inside backend modules so importing the package remains safe on CI and non-Raspberry-Pi systems.
 
 ## Package boundary
