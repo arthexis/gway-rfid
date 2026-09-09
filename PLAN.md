@@ -93,7 +93,9 @@ access keys alone are not treated as proof that a command is trusted.
 
 ### Envelope
 
-The canonical UTF-8 payload is a compact object such as:
+The command remains logically textual and structured: `argv` is an argument
+vector of literal strings, never a shell command and never an opcode table.
+Human-facing tools represent an envelope as JSON, for example:
 
 ```json
 {
@@ -105,15 +107,29 @@ The canonical UTF-8 payload is a compact object such as:
 }
 ```
 
+The on-card and signed representation is deterministic canonical CBOR, not
+JSON text. JSON is the diagnostic and interchange representation used by tools
+such as `inspect`; it is not part of the wire format. This keeps commands
+readable at the tooling boundary while reducing card usage and eliminating
+JSON whitespace, escaping, and key-order ambiguity from signatures.
+
 `argv` contains the managed project, command path, and arguments after the
 `gway` executable name. The project and command components are literal.
-Argument strings may contain Sigils for host-local resolution.
+Argument strings may contain Sigils for host-local resolution. Sigils remain
+ordinary text inside the argument vector and are signed unresolved; Gway
+resolves them only after card verification on the target host.
 
-The signature covers the canonical envelope without `sig`. It does not cover
-the UID, allowing the same command to be replicated on a different physical
-card. Ed25519 is the preferred initial signature scheme. Reader nodes receive
-trusted public keys; only card writers receive private keys. Unsigned command
-execution is limited to an explicitly enabled mock/development mode.
+The signature covers the deterministic CBOR encoding of the envelope without
+`sig`. It does not cover the UID, allowing the same command to be replicated on
+a different physical card. Ed25519 is the preferred initial signature scheme.
+Reader nodes receive trusted public keys; only card writers receive private
+keys. Unsigned command execution is limited to an explicitly enabled
+mock/development mode.
+
+The complete signed envelope is then encoded as deterministic CBOR for card
+storage. The content ID is derived from those canonical signed-envelope bytes,
+so the same logical signed command produces the same content ID independent of
+how a human-facing JSON view is formatted.
 
 The first format does not reserve space for execution results. Results and
 audit records remain local, preserving card capacity and avoiding repeated
@@ -282,8 +298,9 @@ settled with adapter tests before it becomes public API.
 ### This repository: `gway-rfid`
 
 1. **Portable card format and codec**
-   - Specify `GWY1`, canonical envelopes, signatures, exact block ordering,
-     transactional writes, and capacity failures.
+   - Specify `GWY1`, deterministic canonical CBOR envelopes, signatures, exact
+     block ordering, transactional writes, JSON inspection views, and capacity
+     failures.
    - Add memory-card/mock transport tests covering cache IDs and incremental
      reads.
 2. **MFRC522 backend and card tools**
@@ -336,7 +353,7 @@ let Gway resolve argument values on the target host. Cross-project coverage for
 this behavior belongs in the Gway invocation PR.
 
 Open a Sigils PR only if a future card-format version needs a new compact
-structured-value encoding; the initial JSON argument vector does not.
+structured-value encoding; the initial CBOR argument vector does not.
 
 ### [`arthexis/gway-field-usb`](https://github.com/arthexis/gway-field-usb)
 
