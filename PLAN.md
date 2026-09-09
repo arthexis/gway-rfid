@@ -109,9 +109,10 @@ Human-facing tools represent an envelope as JSON, for example:
 
 The on-card and signed representation is deterministic canonical CBOR, not
 JSON text. JSON is the diagnostic and interchange representation used by tools
-such as `inspect`; it is not part of the wire format. This keeps commands
-readable at the tooling boundary while reducing card usage and eliminating
-JSON whitespace, escaping, and key-order ambiguity from signatures.
+such as `inspect`; it is not part of the wire format. The wire contract is the
+canonical CBOR byte sequence itself. This keeps commands readable at the
+tooling boundary while reducing card usage and eliminating JSON whitespace,
+escaping, and key-order ambiguity from signatures.
 
 `argv` contains the managed project, command path, and arguments after the
 `gway` executable name. The project and command components are literal.
