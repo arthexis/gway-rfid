@@ -12,4 +12,5 @@ jobs:
   python:
     uses: arthexis/ci-base/.github/workflows/consumer-ci.yml@v1
     with:
+      test-python-versions: '["3.10", "3.13", "3.14"]'
       install-command: python -m pip install -e ".[dev]"
