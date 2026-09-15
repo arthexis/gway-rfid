@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-DEFAULT_QUEUE = "ocpp.authorization"
+DEFAULT_QUEUE = "rfid.scanned"
 DEFAULT_BROKER_ENV = "CELERY_BROKER_URL"
 
 
@@ -15,7 +15,7 @@ def publish_event(
     queue: str = DEFAULT_QUEUE,
     **fields: Any,
 ) -> bool:
-    """Publish a plain JSON event to the local Kombu queue.
+    """Publish a plain JSON event to the selected Kombu queue.
 
     Queue publication is optional and non-fatal so an RFID scan remains useful even
     when the local broker is unavailable.
@@ -44,7 +44,7 @@ def publish_scanned(
     broker_url: str | None = None,
     queue: str = DEFAULT_QUEUE,
 ) -> bool:
-    """Publish a normalized RFID scan using the shared local event queue."""
+    """Publish a normalized RFID scan to the dedicated RFID queue."""
     return publish_event(
         "rfid.scanned",
         broker_url=broker_url,
