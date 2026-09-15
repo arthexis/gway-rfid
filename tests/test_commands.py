@@ -19,7 +19,7 @@ def test_scan_normalizes_mock_uid(monkeypatch):
     assert tag is not None
     assert tag["uid"] == "04A1B2C3"
     assert tag["reader"] == "mock"
-    assert published == [(tag, None, "ocpp.authorization")]
+    assert published == [(tag, None, "rfid.scanned")]
 
 
 def test_scan_can_target_explicit_broker_and_queue(monkeypatch):
