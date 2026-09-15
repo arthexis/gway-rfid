@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from gway_rfid.backends.mock import MockReader
 from gway_rfid.core import normalize_uid
+from gway_rfid.events import DEFAULT_QUEUE, publish_scanned
 
 
 def _reader(*, backend: str = "mock", uid: str | None = None) -> MockReader:
@@ -18,10 +19,19 @@ def status(backend: str = "mock") -> dict[str, object]:
     return _reader(backend=backend).status()
 
 
-def scan(backend: str = "mock", uid: str | None = None) -> dict[str, str] | None:
-    """Perform one scan and return a normalized tag record."""
+def scan(
+    backend: str = "mock",
+    uid: str | None = None,
+    broker_url: str | None = None,
+    queue: str = DEFAULT_QUEUE,
+) -> dict[str, str] | None:
+    """Perform one scan, publish `rfid.scanned`, and return the tag record."""
     tag = _reader(backend=backend, uid=uid).scan()
-    return tag.as_dict() if tag else None
+    if tag is None:
+        return None
+    record = tag.as_dict()
+    publish_scanned(record, broker_url=broker_url, queue=queue)
+    return record
 
 
 def normalize(uid: str) -> str:
