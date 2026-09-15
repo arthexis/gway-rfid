@@ -46,7 +46,7 @@ def test_publish_scanned_uses_plain_json_event(monkeypatch):
         broker_url="redis://localhost:6379/0",
     ) is True
     connection = FakeConnection.last
-    assert connection.queue_name == "ocpp.authorization"
+    assert connection.queue_name == "rfid.scanned"
     payload, serializer = connection.queue.messages[0]
     assert serializer == "json"
     assert payload == {
