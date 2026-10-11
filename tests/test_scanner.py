@@ -52,7 +52,7 @@ def test_polling_suppresses_held_cards():
     reader = FakeReader([tag, tag, None, None])
     events = []
     scanner = Scanner(reader, on_event=events.append, stop_event=ImmediateStop(4),
-                      clock=iter([0.0, 0.1, 0.3, 1.5]).__next__)
+                      clock=iter([0.0, 0.0, 0.1, 0.3, 1.5]).__next__)
     scanner.run()
     assert [(event.kind, event.uid) for event in events] == [
         ("scanned", "0102"), ("removed", "0102")
@@ -107,7 +107,7 @@ def test_transient_scan_error_recovers_without_false_removal():
     events = []
     stop = ImmediateStop(3)
     scanner = Scanner(reader, on_event=events.append, stop_event=stop,
-                      clock=iter([0.0, 0.5]).__next__)
+                      clock=iter([0.0, 0.0, 0.5]).__next__)
     scanner.run()
     assert [event.kind for event in events] == ["scanned"]
     assert scanner.recoveries == 1
@@ -142,3 +142,32 @@ def test_retry_backoff_is_bounded():
     scanner.run()
     assert delays == [1, 2, 2]
     assert scanner.recoveries == 3
+
+
+def test_health_snapshot_tracks_scans_and_freshness():
+    tag = Tag(bytes([0xAB]))
+    reader = FakeReader([tag, None, None])
+    ticks = iter([0.0, 0.0, 0.5, 2.0])
+    scanner = Scanner(reader, on_event=lambda event: None,
+                      stop_event=ImmediateStop(3), clock=ticks.__next__)
+    scanner.run()
+    snapshot = scanner.health.snapshot(now=2.5, freshness_seconds=1)
+    assert snapshot["state"] == "stopped"
+    assert snapshot["polls"] == 3
+    assert snapshot["scans"] == 1
+    assert snapshot["present_uid"] is None
+    assert snapshot["healthy"] is False
+    assert snapshot["last_scan"] is not None
+    assert snapshot["uptime_seconds"] == 2.5
+
+
+def test_health_is_passive_and_empty_reader_can_be_healthy():
+    reader = FakeReader([None])
+    ticks = iter([0.0, 1.0, 1.1])
+    scanner = Scanner(reader, on_event=lambda event: None,
+                      stop_event=ImmediateStop(), clock=ticks.__next__)
+    scanner.run()
+    status = scanner.status()
+    assert status["polls"] == 1
+    assert status["scans"] == 0
+    assert reader.opened == 1
