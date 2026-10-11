@@ -5,7 +5,7 @@ Persistence and signal handling are deliberately outside this module.
 from __future__ import annotations
 
 from collections.abc import Callable
-from threading import Event
+from threading import Event, Lock
 from time import monotonic
 from typing import Protocol
 
@@ -57,6 +57,7 @@ class Scanner:
         self.clock = clock
         self._stop = stop_event if stop_event is not None else Event()
         self._running = False
+        self._run_lock = Lock()
 
     @property
     def state(self) -> str:
@@ -94,9 +95,10 @@ class Scanner:
         self._stop.set()
 
     def run(self) -> None:
-        if self._running:
+        if not self._run_lock.acquire(blocking=False):
             raise RuntimeError("scanner already running")
         if self._stop.is_set():
+            self._run_lock.release()
             return
         self._running = True
         delay = self.retry_initial
@@ -136,12 +138,13 @@ class Scanner:
                 self.health.last_poll_monotonic = now
                 self.health.last_poll = utc_iso()
                 delay = self.retry_initial
-                for event in self.tracker.observe(tag, now):
-                    self.on_event(event)
+                events = self.tracker.observe(tag, now)
+                self.health.present_uid = self.tracker.uid
+                for event in events:
                     if event.kind == "scanned":
                         self.health.scans += 1
                         self.health.last_scan = utc_iso()
-                self.health.present_uid = self.tracker.uid
+                    self.on_event(event)
                 self._stop.wait(self.poll_interval)
         finally:
             try:
@@ -150,3 +153,4 @@ class Scanner:
                 self._running = False
                 if self.state != "failed":
                     self.state = "stopped"
+                self._run_lock.release()
