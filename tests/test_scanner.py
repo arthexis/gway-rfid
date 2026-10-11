@@ -105,7 +105,7 @@ def test_transient_scan_error_recovers_without_false_removal():
 
     reader.scan = scan
     events = []
-    stop = ImmediateStop(4)
+    stop = ImmediateStop(3)
     scanner = Scanner(reader, on_event=events.append, stop_event=stop,
                       clock=iter([0.0, 0.5]).__next__)
     scanner.run()
