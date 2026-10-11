@@ -72,9 +72,9 @@ def test_callback_error_closes_reader():
 
 def test_open_error_still_closes_reader():
     reader = FakeReader()
-    reader.open = Mock(side_effect=OSError("SPI failed"))
+    reader.open = Mock(side_effect=PermissionError("SPI access denied"))
     scanner = Scanner(reader, on_event=lambda event: None)
-    with pytest.raises(OSError, match="SPI failed"):
+    with pytest.raises(PermissionError, match="SPI access denied"):
         scanner.run()
     assert reader.closed == 1
 
@@ -90,3 +90,55 @@ def test_pre_stopped_scanner_never_opens_reader():
 def test_invalid_poll_interval():
     with pytest.raises(ValueError):
         Scanner(FakeReader(), on_event=lambda event: None, poll_interval=0)
+
+
+def test_transient_scan_error_recovers_without_false_removal():
+    tag = Tag(bytes([1]))
+    reader = FakeReader([tag, OSError("SPI glitch"), tag])
+    original_scan = reader.scan
+
+    def scan():
+        value = original_scan()
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    reader.scan = scan
+    events = []
+    stop = ImmediateStop(3)
+    scanner = Scanner(reader, on_event=events.append, stop_event=stop,
+                      clock=iter([0.0, 0.5]).__next__)
+    scanner.run()
+    assert [event.kind for event in events] == ["scanned"]
+    assert scanner.recoveries == 1
+    assert reader.opened == 2
+    assert reader.closed >= 2
+
+
+def test_reader_ownership_failure_is_terminal():
+    reader = FakeReader()
+    reader.open = Mock(side_effect=RuntimeError("RFID reader lock is held"))
+    scanner = Scanner(reader, on_event=lambda event: None)
+    with pytest.raises(RuntimeError, match="lock is held"):
+        scanner.run()
+    assert scanner.recoveries == 0
+    assert scanner.state == "failed"
+
+
+def test_retry_backoff_is_bounded():
+    reader = FakeReader()
+    reader.open = Mock(side_effect=OSError("transient"))
+    stop = ImmediateStop(3)
+    delays = []
+    original_wait = stop.wait
+
+    def wait(seconds):
+        delays.append(seconds)
+        return original_wait(seconds)
+
+    stop.wait = wait
+    scanner = Scanner(reader, on_event=lambda event: None, stop_event=stop,
+                      retry_initial=1, retry_max=2)
+    scanner.run()
+    assert delays == [1, 2, 2]
+    assert scanner.recoveries == 3
