@@ -28,6 +28,7 @@ def test_scan_and_cleanup(monkeypatch):
     monkeypatch.setitem(sys.modules, "RPi.GPIO", gpio)
     monkeypatch.setitem(sys.modules, "mfrc522", module)
     monkeypatch.setattr(MFRC522Reader, "_assert_device_available", lambda self: None)
+    monkeypatch.setattr(MFRC522Reader, "_acquire_lock", lambda self: None)
     reader = MFRC522Reader()
     tag = reader.scan()
     assert tag is not None and tag.uid_hex == "04A1B2C3"
@@ -69,3 +70,32 @@ def test_spi_owner_detection(monkeypatch, tmp_path):
     monkeypatch.setattr(backend, "Path", fake_path)
     with pytest.raises(RuntimeError, match="already in use"):
         MFRC522Reader()._assert_device_available()
+
+
+def test_open_failure_releases_lock(monkeypatch):
+    import pytest
+    reader = MFRC522Reader()
+    monkeypatch.setattr(reader, "_acquire_lock", lambda: setattr(reader, "_lock_fd", 12345))
+    monkeypatch.setattr(reader, "_assert_device_available", lambda: (_ for _ in ()).throw(RuntimeError("busy")))
+    closed = []
+    monkeypatch.setattr("gway_rfid.backends.mfrc522.os.close", lambda fd: closed.append(fd))
+    with pytest.raises(RuntimeError, match="busy"):
+        reader.open()
+    assert closed == [12345]
+    assert reader._lock_fd is None
+
+
+def test_lock_contention(monkeypatch, tmp_path):
+    import pytest
+    import gway_rfid.backends.mfrc522 as backend
+    from pathlib import Path
+    real_path = Path
+    monkeypatch.setattr(backend, "Path", lambda value: tmp_path / "lock" if str(value).startswith("/run/lock/") else real_path(value))
+    first, second = MFRC522Reader(), MFRC522Reader()
+    try:
+        first._acquire_lock()
+        with pytest.raises(RuntimeError, match="lock is held"):
+            second._acquire_lock()
+    finally:
+        first.close()
+        second.close()
