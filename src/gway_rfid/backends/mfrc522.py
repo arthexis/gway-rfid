@@ -6,6 +6,8 @@ reader owner may instantiate/open this backend on a live device.
 from __future__ import annotations
 
 from typing import Any
+import os
+from pathlib import Path
 
 from gway_rfid.core import Tag
 
@@ -21,6 +23,7 @@ class MFRC522Reader:
     def open(self) -> None:
         if self._reader is not None:
             return
+        self._assert_device_available()
         import RPi.GPIO as GPIO  # type: ignore[import-not-found]
         from mfrc522 import MFRC522  # type: ignore[import-not-found]
 
@@ -29,6 +32,30 @@ class MFRC522Reader:
             bus=self.bus, device=self.device,
             pin_mode=self.pin_mode, pin_rst=self.pin_rst,
         )
+
+    def _assert_device_available(self) -> None:
+        """Fail closed if another process already holds the SPI device.
+
+        Legacy kiosk publisher does not participate in advisory locks, so a
+        lockfile alone is insufficient. Inspect open file descriptors first.
+        """
+        target = Path(f"/dev/spidev{self.bus}.{self.device}")
+        if not target.exists():
+            raise RuntimeError(f"RFID SPI device unavailable: {target}")
+        stat = target.stat()
+        for proc in Path('/proc').iterdir():
+            if not proc.name.isdigit() or int(proc.name) == os.getpid():
+                continue
+            try:
+                for fd in (proc / 'fd').iterdir():
+                    try:
+                        fd_stat = fd.stat()
+                        if (fd_stat.st_dev, fd_stat.st_ino) == (stat.st_dev, stat.st_ino):
+                            raise RuntimeError(f"RFID SPI device already in use by PID {proc.name}")
+                    except (FileNotFoundError, PermissionError):
+                        continue
+            except (FileNotFoundError, PermissionError):
+                continue
 
     def scan(self) -> Tag | None:
         self.open()
@@ -43,10 +70,12 @@ class MFRC522Reader:
         return Tag(uid=bytes(uid), reader=self.name)
 
     def read_block(self, block: int, uid: bytes, *, key_type: str, key: bytes) -> bytes | None:
-        self.open()
-        reader = self._reader
         if key_type not in ("A", "B") or len(key) != 6:
             raise ValueError("key_type must be A/B and key must be six bytes")
+        if not 0 <= block <= 63:
+            raise ValueError("block must be within MIFARE Classic 1K range")
+        self.open()
+        reader = self._reader
         mode = reader.PICC_AUTHENT1B if key_type == "B" else reader.PICC_AUTHENT1A
         try:
             if reader.MFRC522_Auth(mode, block, list(key), list(uid)) != reader.MI_OK:
