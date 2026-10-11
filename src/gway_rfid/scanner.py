@@ -5,12 +5,12 @@ Persistence and signal handling are deliberately outside this module.
 from __future__ import annotations
 
 from collections.abc import Callable
-from enum import Enum
 from threading import Event
 from time import monotonic
 from typing import Protocol
 
 from gway_rfid.core import Reader
+from gway_rfid.health import ScannerHealth, utc_iso
 from gway_rfid.presence import PresenceEvent, PresenceTracker
 
 
@@ -48,6 +48,7 @@ class Scanner:
         self.recoverable = recoverable or self._recoverable
         self.recoveries = 0
         self.last_error: str | None = None
+        self.health = ScannerHealth()
         self.state = "stopped"
         self.reader = reader
         self.on_event = on_event
@@ -56,6 +57,20 @@ class Scanner:
         self.clock = clock
         self._stop = stop_event if stop_event is not None else Event()
         self._running = False
+
+    @property
+    def state(self) -> str:
+        return self.health.state
+
+    @state.setter
+    def state(self, value: str) -> None:
+        self.health.state = value
+
+    def status(self, *, freshness_seconds: float = 2.0) -> dict[str, object]:
+        """Passive snapshot; never opens or polls hardware."""
+        result = self.health.snapshot(now=self.clock(), freshness_seconds=freshness_seconds)
+        result["backend"] = self.reader.name if hasattr(self.reader, "name") else type(self.reader).__name__
+        return result
 
     @staticmethod
     def _recoverable(error: Exception) -> bool:
@@ -87,6 +102,8 @@ class Scanner:
         delay = self.retry_initial
         opened = False
         self.state = "starting"
+        self.health.started_at = utc_iso()
+        self.health.started_monotonic = self.clock()
         try:
             while not self._stop.is_set():
                 try:
@@ -96,6 +113,8 @@ class Scanner:
                     tag = self.reader.scan()
                 except Exception as error:
                     self.last_error = f"{type(error).__name__}: {error}"
+                    self.health.last_error = self.last_error
+                    self.health.errors += 1
                     try:
                         self.reader.close()
                     finally:
@@ -105,14 +124,24 @@ class Scanner:
                         raise
                     self.state = "recovering"
                     self.recoveries += 1
+                    self.health.recoveries = self.recoveries
                     self._stop.wait(delay)
                     delay = min(delay * 2, self.retry_max)
                     continue
                 self.state = "running"
                 self.last_error = None
+                self.health.last_error = None
+                now = self.clock()
+                self.health.polls += 1
+                self.health.last_poll_monotonic = now
+                self.health.last_poll = utc_iso()
                 delay = self.retry_initial
-                for event in self.tracker.observe(tag, self.clock()):
+                for event in self.tracker.observe(tag, now):
                     self.on_event(event)
+                    if event.kind == "scanned":
+                        self.health.scans += 1
+                        self.health.last_scan = utc_iso()
+                self.health.present_uid = self.tracker.uid
                 self._stop.wait(self.poll_interval)
         finally:
             try:
