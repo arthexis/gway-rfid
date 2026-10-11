@@ -103,6 +103,7 @@ class Scanner:
         self._running = True
         delay = self.retry_initial
         opened = False
+        needs_close = True
         self.state = "starting"
         self.health.started_at = utc_iso()
         self.health.started_monotonic = self.clock()
@@ -112,6 +113,7 @@ class Scanner:
                     if not opened:
                         self.reader.open()
                         opened = True
+                        needs_close = True
                     tag = self.reader.scan()
                 except Exception as error:
                     self.last_error = f"{type(error).__name__}: {error}"
@@ -121,6 +123,7 @@ class Scanner:
                         self.reader.close()
                     finally:
                         opened = False
+                        needs_close = False
                     if not self.recoverable(error):
                         self.state = "failed"
                         raise
@@ -148,7 +151,8 @@ class Scanner:
                 self._stop.wait(self.poll_interval)
         finally:
             try:
-                self.reader.close()
+                if needs_close:
+                    self.reader.close()
             finally:
                 self._running = False
                 if self.state != "failed":
