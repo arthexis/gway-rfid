@@ -171,3 +171,30 @@ def test_health_is_passive_and_empty_reader_can_be_healthy():
     assert status["polls"] == 1
     assert status["scans"] == 0
     assert reader.opened == 1
+
+
+def test_health_freshness_while_running():
+    from gway_rfid.health import ScannerHealth
+    health = ScannerHealth(state="running", last_poll_monotonic=10.0)
+    assert health.snapshot(now=10.5)["healthy"] is True
+    assert health.snapshot(now=13.0)["healthy"] is False
+    health.state = "recovering"
+    assert health.snapshot(now=10.5)["healthy"] is False
+
+
+def test_callback_failure_never_retries_reader():
+    reader = FakeReader([Tag(bytes([1]))])
+    scanner = Scanner(reader, on_event=Mock(side_effect=OSError("delivery failed")))
+    with pytest.raises(OSError, match="delivery failed"):
+        scanner.run()
+    assert scanner.recoveries == 0
+    assert reader.closed == 1
+
+
+def test_shutdown_interrupts_recovery():
+    reader = FakeReader()
+    reader.open = Mock(side_effect=OSError("temporary"))
+    scanner = Scanner(reader, on_event=lambda event: None, stop_event=ImmediateStop())
+    scanner.run()
+    assert reader.open.call_count == 1
+    assert scanner.recoveries == 1
