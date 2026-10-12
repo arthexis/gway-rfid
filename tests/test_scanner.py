@@ -1,0 +1,200 @@
+from __future__ import annotations
+
+from threading import Event
+from unittest.mock import Mock
+
+import pytest
+
+from gway_rfid.core import Tag
+from gway_rfid.scanner import Scanner
+
+
+class FakeReader:
+    def __init__(self, observations=()):
+        self.observations = iter(observations)
+        self.opened = 0
+        self.closed = 0
+
+    def open(self):
+        self.opened += 1
+
+    def close(self):
+        self.closed += 1
+
+    def scan(self):
+        return next(self.observations)
+
+    def status(self):
+        return {"ready": bool(self.opened and not self.closed)}
+
+
+class ImmediateStop:
+    def __init__(self, after=1):
+        self.stopped = False
+        self.after = after
+        self.waits = 0
+
+    def is_set(self):
+        return self.stopped
+
+    def set(self):
+        self.stopped = True
+
+    def wait(self, _seconds):
+        self.waits += 1
+        if self.waits >= self.after:
+            self.set()
+        return self.stopped
+
+
+def test_polling_suppresses_held_cards():
+    tag = Tag(b"\x01\x02")
+    reader = FakeReader([tag, tag, None, None])
+    events = []
+    scanner = Scanner(reader, on_event=events.append, stop_event=ImmediateStop(4),
+                      clock=iter([0.0, 0.0, 0.1, 0.3, 1.5]).__next__)
+    scanner.run()
+    assert [(event.kind, event.uid) for event in events] == [
+        ("scanned", "0102"), ("removed", "0102")
+    ]
+    assert reader.opened == reader.closed == 1
+    assert not scanner.running
+
+
+def test_callback_error_closes_reader():
+    reader = FakeReader([Tag(b"\x01")])
+    scanner = Scanner(reader, on_event=Mock(side_effect=ValueError("delivery failed")),
+                      stop_event=ImmediateStop())
+    with pytest.raises(ValueError, match="delivery failed"):
+        scanner.run()
+    assert reader.closed == 1
+
+
+def test_open_error_still_closes_reader():
+    reader = FakeReader()
+    reader.open = Mock(side_effect=PermissionError("SPI access denied"))
+    scanner = Scanner(reader, on_event=lambda event: None)
+    with pytest.raises(PermissionError, match="SPI access denied"):
+        scanner.run()
+    assert reader.closed == 1
+
+
+def test_pre_stopped_scanner_never_opens_reader():
+    stop = Event()
+    stop.set()
+    reader = FakeReader()
+    Scanner(reader, on_event=lambda event: None, stop_event=stop).run()
+    assert reader.opened == 0
+
+
+def test_invalid_poll_interval():
+    with pytest.raises(ValueError):
+        Scanner(FakeReader(), on_event=lambda event: None, poll_interval=0)
+
+
+def test_transient_scan_error_recovers_without_false_removal():
+    tag = Tag(bytes([1]))
+    reader = FakeReader([tag, OSError("SPI glitch"), tag])
+    original_scan = reader.scan
+
+    def scan():
+        value = original_scan()
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    reader.scan = scan
+    events = []
+    stop = ImmediateStop(3)
+    scanner = Scanner(reader, on_event=events.append, stop_event=stop,
+                      clock=iter([0.0, 0.0, 0.5]).__next__)
+    scanner.run()
+    assert [event.kind for event in events] == ["scanned"]
+    assert scanner.recoveries == 1
+    assert reader.opened == 2
+    assert reader.closed >= 2
+
+
+def test_reader_ownership_failure_is_terminal():
+    reader = FakeReader()
+    reader.open = Mock(side_effect=RuntimeError("RFID reader lock is held"))
+    scanner = Scanner(reader, on_event=lambda event: None)
+    with pytest.raises(RuntimeError, match="lock is held"):
+        scanner.run()
+    assert scanner.recoveries == 0
+    assert scanner.state == "failed"
+
+
+def test_retry_backoff_is_bounded():
+    reader = FakeReader()
+    reader.open = Mock(side_effect=OSError("transient"))
+    stop = ImmediateStop(3)
+    delays = []
+    original_wait = stop.wait
+
+    def wait(seconds):
+        delays.append(seconds)
+        return original_wait(seconds)
+
+    stop.wait = wait
+    scanner = Scanner(reader, on_event=lambda event: None, stop_event=stop,
+                      retry_initial=1, retry_max=2)
+    scanner.run()
+    assert delays == [1, 2, 2]
+    assert scanner.recoveries == 3
+
+
+def test_health_snapshot_tracks_scans_and_freshness():
+    tag = Tag(bytes([0xAB]))
+    reader = FakeReader([tag, None, None])
+    ticks = iter([0.0, 0.0, 0.5, 2.0])
+    scanner = Scanner(reader, on_event=lambda event: None,
+                      stop_event=ImmediateStop(3), clock=ticks.__next__)
+    scanner.run()
+    snapshot = scanner.health.snapshot(now=2.5, freshness_seconds=1)
+    assert snapshot["state"] == "stopped"
+    assert snapshot["polls"] == 3
+    assert snapshot["scans"] == 1
+    assert snapshot["present_uid"] is None
+    assert snapshot["healthy"] is False
+    assert snapshot["last_scan"] is not None
+    assert snapshot["uptime_seconds"] == 2.5
+
+
+def test_health_is_passive_and_empty_reader_can_be_healthy():
+    reader = FakeReader([None])
+    ticks = iter([0.0, 1.0, 1.1])
+    scanner = Scanner(reader, on_event=lambda event: None,
+                      stop_event=ImmediateStop(), clock=ticks.__next__)
+    scanner.run()
+    status = scanner.status()
+    assert status["polls"] == 1
+    assert status["scans"] == 0
+    assert reader.opened == 1
+
+
+def test_health_freshness_while_running():
+    from gway_rfid.health import ScannerHealth
+    health = ScannerHealth(state="running", last_poll_monotonic=10.0)
+    assert health.snapshot(now=10.5)["healthy"] is True
+    assert health.snapshot(now=13.0)["healthy"] is False
+    health.state = "recovering"
+    assert health.snapshot(now=10.5)["healthy"] is False
+
+
+def test_callback_failure_never_retries_reader():
+    reader = FakeReader([Tag(bytes([1]))])
+    scanner = Scanner(reader, on_event=Mock(side_effect=OSError("delivery failed")))
+    with pytest.raises(OSError, match="delivery failed"):
+        scanner.run()
+    assert scanner.recoveries == 0
+    assert reader.closed == 1
+
+
+def test_shutdown_interrupts_recovery():
+    reader = FakeReader()
+    reader.open = Mock(side_effect=OSError("temporary"))
+    scanner = Scanner(reader, on_event=lambda event: None, stop_event=ImmediateStop())
+    scanner.run()
+    assert reader.open.call_count == 1
+    assert scanner.recoveries == 1
