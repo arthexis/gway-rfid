@@ -177,13 +177,8 @@ def test_open_failure_preserves_closed_state(hardware, monkeypatch):
 
 
 def test_lock_acquisition_and_release(monkeypatch, tmp_path):
-    import os
-    import fcntl
-    from pathlib import Path
-
     reader = MFRC522Reader()
     lock_path = tmp_path / "reader.lock"
-    real_path = Path
 
     # Replace only the backend's lock-path constructor.
     import gway_rfid.backends.mfrc522 as backend
@@ -212,7 +207,6 @@ def test_device_missing_fails_closed(monkeypatch, tmp_path):
 
 
 def test_device_owner_detected(monkeypatch, tmp_path):
-    import os
     import gway_rfid.backends.mfrc522 as backend
 
     device = tmp_path / "spidev0.0"
