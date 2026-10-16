@@ -48,9 +48,9 @@ def test_read_block_validates_before_open():
 
 
 def test_spi_owner_detection(monkeypatch, tmp_path):
-    import pytest
-    import os
     from pathlib import Path
+
+    import pytest
 
     device = tmp_path / "spidev0.0"
     device.write_bytes(b"device")
@@ -86,9 +86,11 @@ def test_open_failure_releases_lock(monkeypatch):
 
 
 def test_lock_contention(monkeypatch, tmp_path):
-    import pytest
-    import gway_rfid.backends.mfrc522 as backend
     from pathlib import Path
+
+    import pytest
+
+    import gway_rfid.backends.mfrc522 as backend
     real_path = Path
     monkeypatch.setattr(backend, "Path", lambda value: tmp_path / "lock" if str(value).startswith("/run/lock/") else real_path(value))
     first, second = MFRC522Reader(), MFRC522Reader()
