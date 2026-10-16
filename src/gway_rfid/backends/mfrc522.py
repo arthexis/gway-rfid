@@ -5,10 +5,10 @@ reader owner may instantiate/open this backend on a live device.
 """
 from __future__ import annotations
 
-from typing import Any
 import fcntl
 import os
 from pathlib import Path
+from typing import Any
 
 from gway_rfid.core import Tag
 
