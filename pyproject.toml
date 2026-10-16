@@ -18,6 +18,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+hardware = [
+  "mfrc522==0.0.7",
+  "RPi.GPIO==0.7.1",
+  "spidev==3.8",
+]
 queue = [
   "kombu>=5.3,<6",
 ]
