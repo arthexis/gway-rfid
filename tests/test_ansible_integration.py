@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 import subprocess
-import sys
 
 import pytest
 
@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(shutil.which('ansible-playbook') is None, reason='Ansible not installed')
 def test_ansible_fresh_install_and_repeat(tmp_path: Path) -> None:
     prefix = tmp_path / "rfid"
     cmd = [
