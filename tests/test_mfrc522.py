@@ -174,3 +174,99 @@ def test_open_failure_preserves_closed_state(hardware, monkeypatch):
         reader.open()
     assert chips == []
     assert reader.status()["ready"] is False
+
+
+def test_lock_acquisition_and_release(monkeypatch, tmp_path):
+    import os
+    import fcntl
+    from pathlib import Path
+
+    reader = MFRC522Reader()
+    lock_path = tmp_path / "reader.lock"
+    real_path = Path
+
+    # Replace only the backend's lock-path constructor.
+    import gway_rfid.backends.mfrc522 as backend
+    monkeypatch.setattr(backend, "Path", lambda _value: lock_path)
+    reader._acquire_lock()
+    assert reader._lock_fd is not None
+    original_fd = reader._lock_fd
+    reader._acquire_lock()
+    assert reader._lock_fd == original_fd
+    competitor = MFRC522Reader()
+    with pytest.raises(RuntimeError, match="lock is held"):
+        competitor._acquire_lock()
+    reader.close()
+    assert reader._lock_fd is None
+    competitor._acquire_lock()
+    competitor.close()
+
+
+def test_device_missing_fails_closed(monkeypatch, tmp_path):
+    import gway_rfid.backends.mfrc522 as backend
+
+    missing = tmp_path / "missing-spi"
+    monkeypatch.setattr(backend, "Path", lambda _value: missing)
+    with pytest.raises(RuntimeError, match="SPI device unavailable"):
+        MFRC522Reader()._assert_device_available()
+
+
+def test_device_owner_detected(monkeypatch, tmp_path):
+    import os
+    import gway_rfid.backends.mfrc522 as backend
+
+    device = tmp_path / "spidev0.0"
+    device.write_bytes(b"device")
+    proc = tmp_path / "proc"
+    fd_dir = proc / "987654" / "fd"
+    fd_dir.mkdir(parents=True)
+    (fd_dir / "3").symlink_to(device)
+    real_path = backend.Path
+
+    def fake_path(value):
+        if value == "/proc":
+            return proc
+        if str(value).startswith("/dev/spidev"):
+            return device
+        return real_path(value)
+
+    monkeypatch.setattr(backend, "Path", fake_path)
+    with pytest.raises(RuntimeError, match="already in use"):
+        MFRC522Reader()._assert_device_available()
+
+
+def test_open_failure_releases_real_lock(monkeypatch, tmp_path):
+    import gway_rfid.backends.mfrc522 as backend
+
+    lock_path = tmp_path / "reader.lock"
+    monkeypatch.setattr(backend, "Path", lambda _value: lock_path)
+    reader = MFRC522Reader()
+    monkeypatch.setattr(reader, "_assert_device_available",
+                        lambda: (_ for _ in ()).throw(RuntimeError("missing SPI")))
+    with pytest.raises(RuntimeError, match="missing SPI"):
+        reader.open()
+    assert reader._lock_fd is None
+    other = MFRC522Reader()
+    other._acquire_lock()
+    other.close()
+
+
+def test_context_manager_closes_on_exception(hardware):
+    _, chips = hardware
+    reader = MFRC522Reader()
+    with pytest.raises(RuntimeError, match="failure"):
+        with reader:
+            raise RuntimeError("failure")
+    assert reader.status()["ready"] is False
+    chips[0].spi.close.assert_called_once()
+
+
+def test_read_exception_still_stops_crypto(hardware):
+    _, chips = hardware
+    reader = MFRC522Reader()
+    reader.open()
+    chips[0].MFRC522_Read.side_effect = OSError("SPI read failed")
+    with pytest.raises(OSError, match="SPI read failed"):
+        reader.read_block(1, b"\x01", key_type="A", key=b"\xff" * 6)
+    chips[0].MFRC522_StopCrypto1.assert_called_once()
+    reader.close()
