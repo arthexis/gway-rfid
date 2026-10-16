@@ -1,29 +1,32 @@
+"""Hardware-independent contract tests for the existing MFRC522 backend."""
 from __future__ import annotations
 
 import sys
 from types import ModuleType
+from unittest.mock import Mock
 
 import pytest
 
 from gway_rfid.backends.mfrc522 import MFRC522Reader
 
 
-class FakeChip:
+class Chip:
     MI_OK = 0
     PICC_REQIDL = 0x26
     PICC_AUTHENT1A = 0x60
     PICC_AUTHENT1B = 0x61
 
-    def __init__(self, **kwargs):
-        self.config = kwargs
-        self.request = (0, 0)
+    def __init__(self, **config):
+        self.config = config
+        self.request = (0, None)
         self.anticoll = (0, [1, 2, 3, 4])
         self.auth_status = 0
         self.read_result = (0, list(range(16)))
-        self.selected = []
-        self.auth_calls = []
-        self.read_calls = []
-        self.stops = 0
+        self.spi = Mock()
+        self.MFRC522_SelectTag = Mock()
+        self.MFRC522_Auth = Mock(side_effect=lambda *args: self.auth_status)
+        self.MFRC522_Read = Mock(side_effect=lambda block: self.read_result)
+        self.MFRC522_StopCrypto1 = Mock()
 
     def MFRC522_Request(self, mode):
         assert mode == self.PICC_REQIDL
@@ -32,35 +35,18 @@ class FakeChip:
     def MFRC522_Anticoll(self):
         return self.anticoll
 
-    def MFRC522_SelectTag(self, uid):
-        self.selected.append(uid)
-
-    def MFRC522_Auth(self, mode, block, key, uid):
-        self.auth_calls.append((mode, block, key, uid))
-        return self.auth_status
-
-    def MFRC522_Read(self, block):
-        self.read_calls.append(block)
-        return self.read_result
-
-    def MFRC522_StopCrypto1(self):
-        self.stops += 1
-
 
 @pytest.fixture
 def hardware(monkeypatch):
     gpio = ModuleType("RPi.GPIO")
-    gpio.warnings = []
-    gpio.cleanups = 0
-    gpio.setwarnings = lambda value: gpio.warnings.append(value)
-    gpio.cleanup = lambda: setattr(gpio, "cleanups", gpio.cleanups + 1)
+    gpio.setwarnings = Mock()
     rpi = ModuleType("RPi")
     rpi.GPIO = gpio
     module = ModuleType("mfrc522")
     chips = []
 
     def factory(**kwargs):
-        chip = FakeChip(**kwargs)
+        chip = Chip(**kwargs)
         chips.append(chip)
         return chip
 
@@ -68,10 +54,12 @@ def hardware(monkeypatch):
     monkeypatch.setitem(sys.modules, "RPi", rpi)
     monkeypatch.setitem(sys.modules, "RPi.GPIO", gpio)
     monkeypatch.setitem(sys.modules, "mfrc522", module)
+    monkeypatch.setattr(MFRC522Reader, "_acquire_lock", lambda self: None)
+    monkeypatch.setattr(MFRC522Reader, "_assert_device_available", lambda self: None)
     return gpio, chips
 
 
-def test_lazy_open_defaults_and_idempotence(hardware):
+def test_open_is_lazy_idempotent_and_close_releases_spi(hardware):
     gpio, chips = hardware
     reader = MFRC522Reader()
     assert chips == []
@@ -79,97 +67,110 @@ def test_lazy_open_defaults_and_idempotence(hardware):
     reader.open()
     assert len(chips) == 1
     assert chips[0].config == {"bus": 0, "device": 0, "pin_mode": 11, "pin_rst": 25}
-    assert gpio.warnings == [False]
+    gpio.setwarnings.assert_called_once_with(False)
+    assert reader.status()["ready"] is True
     reader.close()
-    assert chips[0].stops == 1
-    assert gpio.cleanups == 1
+    chips[0].spi.close.assert_called_once()
+    assert reader.status()["ready"] is False
     reader.close()
-    assert gpio.cleanups == 1
+    chips[0].spi.close.assert_called_once()
 
 
-def test_custom_pins_and_reopen(hardware):
-    gpio, chips = hardware
-    reader = MFRC522Reader(bus=1, device=1, pin_mode=10, pin_rst=24)
+def test_custom_hardware_parameters(hardware):
+    _, chips = hardware
+    reader = MFRC522Reader(1, 1, 10, 24)
     reader.open()
     assert chips[0].config == {"bus": 1, "device": 1, "pin_mode": 10, "pin_rst": 24}
     reader.close()
-    reader.open()
-    assert len(chips) == 2
-    reader.close()
-    assert gpio.cleanups == 2
 
 
-@pytest.mark.parametrize("failure", ["request", "anticoll", "empty_uid"])
-def test_detect_uid_rejects_failed_detection(hardware, failure):
+@pytest.mark.parametrize("failure", ["request", "anticoll", "empty"])
+def test_scan_returns_none_for_absent_or_invalid_card(hardware, failure):
     _, chips = hardware
     reader = MFRC522Reader()
     reader.open()
-    chip = chips[0]
     if failure == "request":
-        chip.request = (1, 0)
+        chips[0].request = (1, None)
     elif failure == "anticoll":
-        chip.anticoll = (1, [])
+        chips[0].anticoll = (1, [])
     else:
-        chip.anticoll = (0, [])
-    assert reader.detect_uid() is None
-    assert chip.selected == []
+        chips[0].anticoll = (0, [])
+    assert reader.scan() is None
+    chips[0].MFRC522_SelectTag.assert_not_called()
+    reader.close()
 
 
-def test_detect_uid_selects_card(hardware):
+def test_scan_returns_tag_and_selects_uid(hardware):
     _, chips = hardware
     reader = MFRC522Reader()
-    assert reader.detect_uid() == bytes([1, 2, 3, 4])
-    assert chips[0].selected == [[1, 2, 3, 4]]
+    tag = reader.scan()
+    assert tag is not None
+    assert tag.uid == b"\x01\x02\x03\x04"
+    assert tag.reader == "mfrc522"
+    chips[0].MFRC522_SelectTag.assert_called_once_with([1, 2, 3, 4])
+    reader.close()
 
 
-@pytest.mark.parametrize("key_type,mode", [("A", 0x60), ("B", 0x61)])
-def test_authenticated_block_read_and_crypto_cleanup(hardware, key_type, mode):
+@pytest.mark.parametrize("kind,mode", [("A", 0x60), ("B", 0x61)])
+def test_authenticated_block_read(hardware, kind, mode):
     _, chips = hardware
     reader = MFRC522Reader()
-    data = reader.read_block(4, b"\x01\x02\x03\x04", key_type=key_type)
-    assert data == bytes(range(16))
-    chip = chips[0]
-    assert chip.auth_calls == [(mode, 4, [255] * 6, [1, 2, 3, 4])]
-    assert chip.read_calls == [4]
-    assert chip.stops == 1
+    assert reader.read_block(4, b"\x01\x02", key_type=kind, key=b"\xff" * 6) == bytes(range(16))
+    chips[0].MFRC522_Auth.assert_called_once_with(mode, 4, [255] * 6, [1, 2])
+    chips[0].MFRC522_Read.assert_called_once_with(4)
+    chips[0].MFRC522_StopCrypto1.assert_called_once()
+    reader.close()
 
 
-@pytest.mark.parametrize("result", [(1, [0] * 16), (0, None), (0, [0] * 15)])
-def test_bad_block_result_returns_none_and_cleans_up(hardware, result):
-    _, chips = hardware
-    reader = MFRC522Reader()
-    reader.open()
-    chips[0].read_result = result
-    assert reader.read_block(1, b"\x01") is None
-    assert chips[0].stops == 1
-
-
-def test_auth_failure_does_not_read_block(hardware):
+def test_auth_failure_does_not_read_and_stops_crypto(hardware):
     _, chips = hardware
     reader = MFRC522Reader()
     reader.open()
     chips[0].auth_status = 1
-    assert reader.read_block(2, b"\x01") is None
-    assert chips[0].read_calls == []
-    assert chips[0].stops == 1
+    assert reader.read_block(1, b"\x01", key_type="A", key=b"\xff" * 6) is None
+    chips[0].MFRC522_Read.assert_not_called()
+    chips[0].MFRC522_StopCrypto1.assert_called_once()
+    reader.close()
 
 
-@pytest.mark.parametrize("kwargs", [
-    {"block": -1, "uid": b"\x01"},
-    {"block": 1, "uid": b"\x01", "key_type": "C"},
-    {"block": 1, "uid": b"\x01", "key": b"short"},
+@pytest.mark.parametrize("result", [(1, [0] * 16), (0, None), (0, [0] * 15)])
+def test_invalid_block_response_stops_crypto(hardware, result):
+    _, chips = hardware
+    reader = MFRC522Reader()
+    reader.open()
+    chips[0].read_result = result
+    assert reader.read_block(2, b"\x01", key_type="B", key=b"\xff" * 6) is None
+    chips[0].MFRC522_StopCrypto1.assert_called_once()
+    reader.close()
+
+
+@pytest.mark.parametrize("block,kind,key", [
+    (-1, "A", b"\xff" * 6), (64, "A", b"\xff" * 6),
+    (1, "C", b"\xff" * 6), (1, "A", b"short"),
 ])
-def test_invalid_read_arguments_do_not_open_hardware(hardware, kwargs):
+def test_invalid_read_does_not_open_device(hardware, block, kind, key):
     _, chips = hardware
     with pytest.raises(ValueError):
-        MFRC522Reader().read_block(**kwargs)
+        MFRC522Reader().read_block(block, b"\x01", key_type=kind, key=key)
     assert chips == []
 
 
-def test_raw_read_response_supported(hardware):
+def test_raw_block_response_supported(hardware):
     _, chips = hardware
     reader = MFRC522Reader()
     reader.open()
     chips[0].read_result = list(range(16))
-    assert reader.read_block(3, b"\x01") == bytes(range(16))
-    assert chips[0].stops == 1
+    assert reader.read_block(1, b"\x01", key_type="A", key=b"\xff" * 6) == bytes(range(16))
+    reader.close()
+
+
+def test_open_failure_preserves_closed_state(hardware, monkeypatch):
+    _, chips = hardware
+    reader = MFRC522Reader()
+    def fail():
+        raise RuntimeError("device busy")
+    monkeypatch.setattr(reader, "_assert_device_available", fail)
+    with pytest.raises(RuntimeError, match="device busy"):
+        reader.open()
+    assert chips == []
+    assert reader.status()["ready"] is False
