@@ -74,6 +74,10 @@ jobs:
         run: ansible-playbook ansible/playbooks/install.yml -i localhost, --syntax-check
       - name: Validate deployment script
         run: sh -n deploy.sh
+      - name: Install package and test tools
+        run: python -m pip install -e ".[dev]"
+      - name: Exercise fresh and repeated Ansible installation
+        run: python -m pytest -q tests/test_ansible_integration.py
 
   ci:
     name: CI
