@@ -5,6 +5,8 @@
   vars:
     rfid_source: "{{ playbook_dir }}/../.."
     rfid_prefix: "{{ ansible_env.HOME }}/.local/share/gway-rfid"
+    rfid_install_hardware: true
+    rfid_manage_service: true
   tasks:
     - name: Require a non-root Debian deployment account
       ansible.builtin.assert:
@@ -30,6 +32,7 @@
         state: present
         update_cache: true
         cache_valid_time: 3600
+      when: rfid_install_hardware | bool
 
     - name: Create release parent
       ansible.builtin.file:
@@ -108,6 +111,7 @@
         group: root
         mode: '0644'
       register: rfid_unit
+      when: rfid_manage_service | bool
 
     - name: Activate verified release
       ansible.builtin.file:
@@ -124,7 +128,9 @@
         enabled: true
         state: restarted
         daemon_reload: true
-      when: rfid_unit.changed or not rfid_existing.stat.exists
+      when:
+        - rfid_manage_service | bool
+        - rfid_unit.changed or not rfid_existing.stat.exists
 
     - name: Ensure existing RFID service is running
       become: true
@@ -132,4 +138,6 @@
         name: gway-rfid.service
         enabled: true
         state: started
-      when: not rfid_unit.changed and rfid_existing.stat.exists
+      when:
+        - rfid_manage_service | bool
+        - not rfid_unit.changed and rfid_existing.stat.exists
