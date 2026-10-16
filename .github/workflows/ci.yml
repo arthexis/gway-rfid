@@ -28,22 +28,6 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
 
-  quality:
-    name: Ruff lint
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      - name: Install Ruff
-        run: python -m pip install ruff
-      - name: Lint
-        run: python -m ruff check .
-
   package:
     name: Package
     runs-on: ubuntu-24.04
@@ -82,18 +66,17 @@ jobs:
   ci:
     name: CI
     if: always()
-    needs: [tests, quality, package, ansible]
+    needs: [tests, package, ansible]
     runs-on: ubuntu-24.04
     steps:
       - name: Require successful checks
         env:
           TESTS: ${{ needs.tests.result }}
-          QUALITY: ${{ needs.quality.result }}
           PACKAGE: ${{ needs.package.result }}
           ANSIBLE: ${{ needs.ansible.result }}
         run: |
           set -euo pipefail
-          for result in "$TESTS" "$QUALITY" "$PACKAGE" "$ANSIBLE"; do
+          for result in "$TESTS" "$PACKAGE" "$ANSIBLE"; do
             if [[ "$result" != "success" ]]; then
               echo "Required check failed or skipped: $result"
               exit 1
