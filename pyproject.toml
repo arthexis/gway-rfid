@@ -36,6 +36,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["integration: requires Ansible and installs into a temporary directory"]
 
 [tool.ruff]
 target-version = "py310"
