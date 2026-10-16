@@ -62,10 +62,23 @@ jobs:
       - name: Check distributions
         run: test -n "$(find dist -name '*.whl' -print -quit)" && test -n "$(find dist -name '*.tar.gz' -print -quit)"
 
+  ansible:
+    name: Ansible validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ansible
+        run: python -m pip install ansible-core
+      - name: Validate playbook syntax
+        run: ansible-playbook ansible/playbooks/install.yml -i localhost, --syntax-check
+      - name: Validate deployment script
+        run: sh -n deploy.sh
+
   ci:
     name: CI
     if: always()
-    needs: [tests, quality, package]
+    needs: [tests, quality, package, ansible]
     runs-on: ubuntu-24.04
     steps:
       - name: Require successful checks
@@ -73,9 +86,10 @@ jobs:
           TESTS: ${{ needs.tests.result }}
           QUALITY: ${{ needs.quality.result }}
           PACKAGE: ${{ needs.package.result }}
+          ANSIBLE: ${{ needs.ansible.result }}
         run: |
           set -euo pipefail
-          for result in "$TESTS" "$QUALITY" "$PACKAGE"; do
+          for result in "$TESTS" "$QUALITY" "$PACKAGE" "$ANSIBLE"; do
             if [[ "$result" != "success" ]]; then
               echo "Required check failed or skipped: $result"
               exit 1
