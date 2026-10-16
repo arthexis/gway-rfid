@@ -1,8 +1,8 @@
 """Pure presence tracking, independent of hardware, LCD and command dispatch."""
 from __future__ import annotations
 
-from dataclasses import dataclass
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from gway_rfid.core import Tag
 
