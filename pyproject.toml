@@ -28,7 +28,6 @@ queue = [
 ]
 dev = [
   "pytest>=8",
-  "ruff>=0.12",
 ]
 
 [tool.setuptools.packages.find]
@@ -37,17 +36,3 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["integration: requires Ansible and installs into a temporary directory"]
-
-[tool.ruff]
-target-version = "py310"
-line-length = 88
-
-[tool.ruff.lint]
-# Enforce correctness and import hygiene; avoid opinionated simplification rules.
-select = ["E4", "E7", "E9", "F", "I", "BLE"]
-
-[tool.ruff.lint.per-file-ignores]
-# Intentional broad catches: release a held SPI lock even on interruption,
-# and report an unavailable optional event transport without crashing callers.
-"src/gway_rfid/backends/mfrc522.py" = ["BLE001"]
-"src/gway_rfid/events.py" = ["BLE001"]
