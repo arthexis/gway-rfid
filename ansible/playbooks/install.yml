@@ -1,0 +1,143 @@
+---
+- name: Install Gway RFID from a clean checkout
+  hosts: all
+  gather_facts: true
+  vars:
+    rfid_source: "{{ playbook_dir }}/../.."
+    rfid_prefix: "{{ ansible_env.HOME }}/.local/share/gway-rfid"
+    rfid_install_hardware: true
+    rfid_manage_service: true
+  tasks:
+    - name: Require a non-root Debian deployment account
+      ansible.builtin.assert:
+        that:
+          - ansible_user_uid | int != 0
+          - ansible_facts.os_family == 'Debian'
+
+    - name: Read the source commit
+      ansible.builtin.command:
+        argv: [git, -C, "{{ rfid_source }}", rev-parse, --verify, HEAD]
+      delegate_to: localhost
+      register: rfid_commit
+      changed_when: false
+
+    - name: Select immutable commit release
+      ansible.builtin.set_fact:
+        rfid_release: "{{ rfid_prefix }}/releases/{{ rfid_commit.stdout }}"
+
+    - name: Install operating system dependencies for SPI and virtual environments
+      become: true
+      ansible.builtin.apt:
+        name: [python3, python3-venv, python3-pip, git, python3-dev, build-essential, python3-rpi.gpio, python3-spidev]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+      when: rfid_install_hardware | bool
+
+    - name: Create release parent
+      ansible.builtin.file:
+        path: "{{ rfid_prefix }}/releases"
+        state: directory
+        mode: '0755'
+
+    - name: Check existing release
+      ansible.builtin.stat:
+        path: "{{ rfid_release }}"
+      register: rfid_existing
+
+    - name: Check existing release is usable
+      ansible.builtin.command:
+        argv:
+          - "{{ rfid_release }}/venv/bin/python"
+          - -c
+          - "import gway_rfid; from importlib.metadata import version; assert version('gway-rfid')"
+      changed_when: false
+      when: rfid_existing.stat.exists
+
+    - name: Create release directory
+      ansible.builtin.file:
+        path: "{{ rfid_release }}"
+        state: directory
+        mode: '0755'
+      when: not rfid_existing.stat.exists
+
+    - name: Copy application sources
+      ansible.builtin.copy:
+        src: "{{ rfid_source }}/{{ item }}"
+        dest: "{{ rfid_release }}/{{ item }}"
+        mode: preserve
+      loop:
+        - pyproject.toml
+        - README.md
+      when: not rfid_existing.stat.exists
+
+    - name: Copy package directory
+      ansible.builtin.copy:
+        src: "{{ rfid_source }}/src/"
+        dest: "{{ rfid_release }}/src/"
+        mode: preserve
+      when: not rfid_existing.stat.exists
+
+    - name: Create commit-specific virtual environment
+      ansible.builtin.command:
+        argv: [python3, -m, venv, "{{ rfid_release }}/venv"]
+        creates: "{{ rfid_release }}/venv/bin/python"
+      when: not rfid_existing.stat.exists
+
+    - name: Install release into its virtual environment
+      ansible.builtin.command:
+        argv:
+          - "{{ rfid_release }}/venv/bin/python"
+          - -m
+          - pip
+          - install
+          - "{{ rfid_release }}[hardware]"
+      when: not rfid_existing.stat.exists
+
+    - name: Verify installed release before activation
+      ansible.builtin.command:
+        argv:
+          - "{{ rfid_release }}/venv/bin/python"
+          - -c
+          - "import gway_rfid; from importlib.metadata import version; assert version('gway-rfid')"
+      changed_when: false
+
+    - name: Install managed RFID system service
+      become: true
+      ansible.builtin.template:
+        src: "../templates/gway-rfid.service.j2"
+        dest: /etc/systemd/system/gway-rfid.service
+        owner: root
+        group: root
+        mode: '0644'
+      register: rfid_unit
+      when: rfid_manage_service | bool
+
+    - name: Activate verified release
+      ansible.builtin.file:
+        src: "{{ rfid_release }}"
+        dest: "{{ rfid_prefix }}/current"
+        state: link
+        force: true
+        follow: false
+
+    - name: Enable and start RFID observation service
+      become: true
+      ansible.builtin.systemd_service:
+        name: gway-rfid.service
+        enabled: true
+        state: restarted
+        daemon_reload: true
+      when:
+        - rfid_manage_service | bool
+        - rfid_unit.changed or not rfid_existing.stat.exists
+
+    - name: Ensure existing RFID service is running
+      become: true
+      ansible.builtin.systemd_service:
+        name: gway-rfid.service
+        enabled: true
+        state: started
+      when:
+        - rfid_manage_service | bool
+        - not rfid_unit.changed and rfid_existing.stat.exists

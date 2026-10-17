@@ -1,0 +1,15 @@
+[Unit]
+Description=Gway RFID MFRC522 observer
+After=local-fs.target
+
+[Service]
+Type=simple
+User={{ ansible_user_id }}
+WorkingDirectory={{ rfid_prefix }}
+ExecStart={{ rfid_prefix }}/current/venv/bin/python -m gway_rfid.service
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

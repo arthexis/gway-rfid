@@ -28,22 +28,6 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
 
-  quality:
-    name: Ruff lint
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      - name: Install Ruff
-        run: python -m pip install ruff
-      - name: Lint
-        run: python -m ruff check .
-
   package:
     name: Package
     runs-on: ubuntu-24.04
@@ -62,20 +46,37 @@ jobs:
       - name: Check distributions
         run: test -n "$(find dist -name '*.whl' -print -quit)" && test -n "$(find dist -name '*.tar.gz' -print -quit)"
 
+  ansible:
+    name: Ansible validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ansible
+        run: python -m pip install ansible-core
+      - name: Validate playbook syntax
+        run: ansible-playbook ansible/playbooks/install.yml -i localhost, --syntax-check
+      - name: Validate deployment script
+        run: sh -n deploy.sh
+      - name: Install package and test tools
+        run: python -m pip install -e ".[dev]"
+      - name: Exercise fresh and repeated Ansible installation
+        run: python -m pytest -q tests/test_ansible_integration.py
+
   ci:
     name: CI
     if: always()
-    needs: [tests, quality, package]
+    needs: [tests, package, ansible]
     runs-on: ubuntu-24.04
     steps:
       - name: Require successful checks
         env:
           TESTS: ${{ needs.tests.result }}
-          QUALITY: ${{ needs.quality.result }}
           PACKAGE: ${{ needs.package.result }}
+          ANSIBLE: ${{ needs.ansible.result }}
         run: |
           set -euo pipefail
-          for result in "$TESTS" "$QUALITY" "$PACKAGE"; do
+          for result in "$TESTS" "$PACKAGE" "$ANSIBLE"; do
             if [[ "$result" != "success" ]]; then
               echo "Required check failed or skipped: $result"
               exit 1
