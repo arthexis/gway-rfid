@@ -17,10 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_ansible_fresh_install_and_repeat(tmp_path: Path) -> None:
     prefix = tmp_path / "rfid"
     cmd = [
-        "ansible-playbook",
-        str(ROOT / "ansible/playbooks/install.yml"),
-        "-i", "localhost,",
-        "-c", "local",
+        "sh", str(ROOT / "deploy.sh"),
         "-e", f"rfid_prefix={prefix}",
         "-e", "rfid_install_hardware=false",
         "-e", "rfid_manage_service=false",
@@ -39,7 +36,8 @@ def test_ansible_fresh_install_and_repeat(tmp_path: Path) -> None:
         assert result.returncode == 0, result.stdout + result.stderr
         return result.stdout
 
-    install()
+    first = install()
+    assert "RFID TASK TIMING" in first
     assert current.is_symlink()
     assert current.resolve() == release.resolve()
     python = release / "venv/bin/python"
@@ -49,7 +47,8 @@ def test_ansible_fresh_install_and_repeat(tmp_path: Path) -> None:
         check=True, timeout=30
     )
     first_target = current.resolve()
-    install()
+    repeated = install()
+    assert "RFID TASK TIMING" in repeated
     assert current.resolve() == first_target
     assert python.is_file()
     assert not (prefix / "releases" / "legacy").exists()
