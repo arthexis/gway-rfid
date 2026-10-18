@@ -47,29 +47,24 @@ def test_read_block_validates_before_open():
     assert reader.status()["ready"] is False
 
 
-def test_spi_owner_detection(monkeypatch, tmp_path):
+def test_spi_presence_does_not_scan_other_processes(monkeypatch, tmp_path):
     from pathlib import Path
-
-    import pytest
 
     device = tmp_path / "spidev0.0"
     device.write_bytes(b"device")
-    fd_dir = tmp_path / "proc" / "999999" / "fd"
-    fd_dir.mkdir(parents=True)
-    (fd_dir / "3").symlink_to(device)
     original_path = Path
 
-    # Verify the fail-closed rule with a synthetic /proc tree.
     import gway_rfid.backends.mfrc522 as backend
+
     def fake_path(value):
         if value == "/proc":
-            return tmp_path / "proc"
+            raise AssertionError("unprivileged service must not inspect /proc")
         if value == "/dev/spidev0.0":
             return device
         return original_path(value)
+
     monkeypatch.setattr(backend, "Path", fake_path)
-    with pytest.raises(RuntimeError, match="already in use"):
-        MFRC522Reader()._assert_device_available()
+    MFRC522Reader()._assert_device_available()
 
 
 def test_open_failure_releases_lock(monkeypatch):

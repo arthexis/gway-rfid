@@ -206,27 +206,23 @@ def test_device_missing_fails_closed(monkeypatch, tmp_path):
         MFRC522Reader()._assert_device_available()
 
 
-def test_device_owner_detected(monkeypatch, tmp_path):
+def test_spi_presence_does_not_require_reading_other_process_fds(monkeypatch, tmp_path):
+    """Ordinary service users cannot inspect /proc/1/fd."""
     import gway_rfid.backends.mfrc522 as backend
 
     device = tmp_path / "spidev0.0"
-    device.write_bytes(b"device")
-    proc = tmp_path / "proc"
-    fd_dir = proc / "987654" / "fd"
-    fd_dir.mkdir(parents=True)
-    (fd_dir / "3").symlink_to(device)
+    device.touch()
     real_path = backend.Path
 
     def fake_path(value):
-        if value == "/proc":
-            return proc
+        if str(value) == "/proc":
+            raise AssertionError("must not enumerate other processes")
         if str(value).startswith("/dev/spidev"):
             return device
         return real_path(value)
 
     monkeypatch.setattr(backend, "Path", fake_path)
-    with pytest.raises(RuntimeError, match="already in use"):
-        MFRC522Reader()._assert_device_available()
+    MFRC522Reader()._assert_device_available()
 
 
 def test_open_failure_releases_real_lock(monkeypatch, tmp_path):
