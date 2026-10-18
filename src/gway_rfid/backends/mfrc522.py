@@ -1,7 +1,7 @@
 """MFRC522 SPI backend extracted from gway-ap-kiosk field revision 1c602d5.
 
-Hardware libraries are imported only when the reader is opened. Only the
-reader owner may instantiate/open this backend on a live device.
+Hardware libraries are imported only when the reader is opened. The
+advisory lock prevents concurrent access by cooperating scanner processes.
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ class MFRC522Reader:
             raise
 
     def _acquire_lock(self) -> None:
-        """Coordinate new scanner processes; legacy publisher needs a cutover."""
+        """Prevent simultaneous access by cooperating RFID scanner processes."""
         if self._lock_fd is not None:
             return
         path = Path(f"/run/lock/gway-rfid-spi{self.bus}.{self.device}.lock")
@@ -54,32 +54,15 @@ class MFRC522Reader:
         self._lock_fd = fd
 
     def _assert_device_available(self) -> None:
-        """Fail closed if another process already holds the SPI device.
+        """Require the configured SPI node; concurrency uses the advisory lock.
 
-        Legacy kiosk publisher does not participate in advisory locks, so a
-        lockfile alone is insufficient. Inspect open file descriptors first.
+        Unprivileged services cannot enumerate other users' /proc/*/fd entries.
+        Such enumeration caused a permanent restart loop on /proc/1/fd.
+        Non-cooperating legacy readers must be disabled during cutover.
         """
         target = Path(f"/dev/spidev{self.bus}.{self.device}")
         if not target.exists():
             raise RuntimeError(f"RFID SPI device unavailable: {target}")
-        stat = target.stat()
-        for proc in Path('/proc').iterdir():
-            if not proc.name.isdigit() or int(proc.name) == os.getpid():
-                continue
-            try:
-                for fd in (proc / 'fd').iterdir():
-                    try:
-                        fd_stat = fd.stat()
-                        if (fd_stat.st_dev, fd_stat.st_ino) == (stat.st_dev, stat.st_ino):
-                            raise RuntimeError(f"RFID SPI device already in use by PID {proc.name}")
-                    except FileNotFoundError:
-                        continue
-                    except PermissionError as exc:
-                        raise RuntimeError(f"Cannot inspect RFID SPI owner PID {proc.name}") from exc
-            except FileNotFoundError:
-                continue
-            except PermissionError as exc:
-                raise RuntimeError(f"Cannot verify RFID SPI ownership for PID {proc.name}") from exc
 
     def scan(self) -> Tag | None:
         self.open()
