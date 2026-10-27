@@ -17,7 +17,14 @@ dependencies = [
   "cryptography>=43",
 ]
 
+[project.scripts]
+gway-rfid = "gway_rfid.label_cli:main"
+
 [project.optional-dependencies]
+printing = [
+  "Pillow>=10",
+  "qrcode>=7.4",
+]
 hardware = [
   "mfrc522==0.0.7",
   "RPi.GPIO==0.7.1",
