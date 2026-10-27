@@ -23,9 +23,9 @@ def test_m220_raster_job_framing():
     im = Image.new("1", (8, 1), 1)
     im.putpixel((0, 0), 0)
     job = build_phomemo_m220_job(im, speed=2, density=15)
-    assert job.startswith(b"\\x1b\\x4e\\x0d\\x02\\x1b\\x4e\\x04\\x0f\\x1f\\x11\\x0a")
-    assert b"\\x1d\\x76\\x30\\x00\\x01\\x00\\x01\\x00\\x80" in job
-    assert job.endswith(b"\\x1f\\xf0\\x05\\x00\\x1f\\xf0\\x03\\x00")
+    assert job.startswith(b"\\1b\\4e\\0d\\02\\1b\\4e\\04\\0f\\1f\\11\\0a")
+    assert b"\\1d\\76\\30\\00\\01\\00\\01\\00\\80" in job
+    assert job.endswith(b"\\1f\\f0\\05\\00\\1f\\f0\\03\\00")
 
 
 def test_preview_png_and_layout():
