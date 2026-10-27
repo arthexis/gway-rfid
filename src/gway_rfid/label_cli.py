@@ -24,6 +24,10 @@ def parser() -> argparse.ArgumentParser:
             sub.add_argument("--output", required=True, help="Destination PNG file")
         else:
             sub.add_argument("--printer", choices=["phomemo-m220"], required=True)
+            sub.add_argument("--transport", choices=["windows", "linux"], default="windows")
+            sub.add_argument("--endpoint", type=lambda v: int(v, 0), help="Verified Linux bulk OUT endpoint, such as 0x01")
+            sub.add_argument("--bus", type=int)
+            sub.add_argument("--address", type=int)
             sub.add_argument("--dry-run", action="store_true")
             sub.add_argument("--usb-path", help="Explicit Windows USBPRINT interface")
             sub.add_argument("--speed", type=int, default=2)
@@ -70,13 +74,19 @@ def run(argv: list[str] | None = None) -> int:
         if args.dry_run:
             print(f"PRINTER=phomemo-m220 COMMAND_BYTES={len(job)} DRY_RUN=1")
             return 0
+        if args.transport == "linux":
+            from .linux_printing import write_linux_usb
+            written = write_linux_usb(job, bus=args.bus, address=args.address, endpoint=args.endpoint,
+                                      chunk_size=args.chunk_bytes, delay_seconds=args.chunk_delay)
+            print(f"PRINTER=phomemo-m220 WRITTEN={written}")
+            return 0
         path = resolve_phomemo_m220_usb_path(args.usb_path)
         if not path:
             raise ValueError("No Windows USBPRINT path available; pass --usb-path or set ARTHEXIS_QR_PRINTER_USB_PATH")
         written = write_windows_usb(path, job, chunk_size=args.chunk_bytes, delay_seconds=args.chunk_delay)
         print(f"PRINTER=phomemo-m220 WRITTEN={written}")
         return 0
-    except (ImportError, OSError, ValueError) as error:
+    except (ImportError, OSError, ValueError, RuntimeError) as error:
         print(f"gway-rfid: {error}", file=sys.stderr)
         return 1
 
