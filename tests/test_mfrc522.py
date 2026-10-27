@@ -260,3 +260,52 @@ def test_read_exception_still_stops_crypto(hardware):
         reader.read_block(1, b"\x01", key_type="A", key=b"\xff" * 6)
     chips[0].MFRC522_StopCrypto1.assert_called_once()
     reader.close()
+
+
+def test_authenticated_write_checks_readback_and_stops_crypto(hardware):
+    _, chips = hardware
+    reader = MFRC522Reader()
+    reader.open()
+    data = bytes(range(16))
+    chip = chips[0]
+    chip.MFRC522_Write = Mock(return_value=None)
+    reader.write_block(2, data, b"\x01\x02", key_type="A", key=b"\xff" * 6)
+    chip.MFRC522_Write.assert_called_once_with(2, list(data))
+    assert chip.MFRC522_StopCrypto1.call_count == 2
+    reader.close()
+
+
+@pytest.mark.parametrize("failure", ["auth", "write", "readback", "exception"])
+def test_write_failures_stop_crypto_and_raise(hardware, failure):
+    _, chips = hardware
+    reader = MFRC522Reader()
+    reader.open()
+    chip = chips[0]
+    chip.MFRC522_Write = Mock(return_value=None)
+    if failure == "auth":
+        chip.auth_status = 1
+    elif failure == "write":
+        chip.MFRC522_Write.return_value = 1
+    elif failure == "readback":
+        chip.read_result = (0, [255] * 16)
+    else:
+        chip.MFRC522_Write.side_effect = OSError("write lost")
+    with pytest.raises(OSError):
+        reader.write_block(2, bytes(range(16)), b"\x01", key_type="A", key=b"\xff" * 6)
+    chip.MFRC522_StopCrypto1.assert_called()
+    if failure == "auth":
+        chip.MFRC522_Write.assert_not_called()
+    reader.close()
+
+
+@pytest.mark.parametrize("block,data,key_type,key", [
+    (0, bytes(16), "A", b"\xff" * 6), (3, bytes(16), "A", b"\xff" * 6),
+    (63, bytes(16), "A", b"\xff" * 6), (64, bytes(16), "A", b"\xff" * 6),
+    (2, bytes(15), "A", b"\xff" * 6), (2, bytes(16), "C", b"\xff" * 6),
+    (2, bytes(16), "A", b"bad"),
+])
+def test_invalid_write_never_opens_hardware(hardware, block, data, key_type, key):
+    _, chips = hardware
+    with pytest.raises(ValueError):
+        MFRC522Reader().write_block(block, data, b"\x01", key_type=key_type, key=key)
+    assert chips == []

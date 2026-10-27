@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(prog="gway-rfid", description="Standalone RFID label utilities")
+    root = argparse.ArgumentParser(prog="gway-rfid", description="Standalone RFID card and label utilities")
     groups = root.add_subparsers(dest="group", required=True)
     label = groups.add_parser("label", help="Render or print an explicit QR label")
     label_commands = label.add_subparsers(dest="action", required=True)
@@ -38,12 +38,17 @@ def parser() -> argparse.ArgumentParser:
     printer_commands = printer.add_subparsers(dest="action", required=True)
     printer_commands.add_parser("devices")
     printer_commands.add_parser("test")
+    from .command_cli import add_commands
+    add_commands(groups)
     return root
 
 
 def run(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
+        if args.group == "command":
+            from .command_cli import run as run_command
+            return run_command(args)
         from .printing import (
             QRLabelSpec, build_qr_label_image, build_phomemo_m220_job,
             iter_phomemo_m220_usb_paths, resolve_phomemo_m220_usb_path,

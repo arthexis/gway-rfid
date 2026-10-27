@@ -1,0 +1,52 @@
+.TH GWAY-RFID 1 "2026-10-27" "gway-rfid" "User Commands"
+.SH NAME
+gway-rfid \- standalone RFID command cards and label utilities
+.SH SYNOPSIS
+.B gway-rfid command write
+.BI --script-file " FILE " --signing-key " PEM " --issuer " NAME"
+.RI ( --image " FILE " | --reader " mfrc522 )"
+.RI [ --label " TEXT ] [ --timeout " SECONDS ] [ --overwrite ]
+.PP
+.B gway-rfid command inspect
+.RI ( --image " FILE " | --reader " mfrc522 )"
+.RI [ --trusted-issuers " DIRECTORY ] [ --show-script ]
+.PP
+.B gway-rfid command run
+.RI ( --image " FILE " | --reader " mfrc522 )"
+.BI --trusted-issuers " DIRECTORY"
+.RI [ --max-timeout " SECONDS ]
+.SH DESCRIPTION
+Shell cards store complete UTF-8 POSIX shell programs in signed canonical CBOR
+on a MIFARE Classic 1K card. No UID-to-command lookup is required.
+The GWY1 shell format uses flag 1 and provides 736 bytes for the entire envelope.
+Writes verify blocks before committing the header. Inspect never executes.
+.PP
+Run explicitly verifies a trusted Ed25519 issuer and executes /bin/sh with
+program text on stdin, a minimal environment, suppressed output and a bounded
+timeout. Root execution is prohibited. Trusted programs retain the invoking
+account's filesystem and network access; this is not a sandbox.
+The observation service does not execute command cards.
+.SH OPTIONS
+.TP
+.B --overwrite
+Required to replace an existing image or write a physical card.
+.TP
+.BI --card-key-file " FILE"
+Protected file containing six raw access-key bytes. Defaults to factory key A.
+.TP
+.BI --card-key-type " A|B"
+Authentication key type; defaults to A.
+.TP
+.BI --trusted-issuers " DIRECTORY"
+Ed25519 public keys named issuer.pem. Required for run; optional for inspect.
+.TP
+.B --show-script
+Include full program text in inspection JSON. Default output hides it.
+.SH LABEL COMMANDS
+Existing label preview, label print, printer devices and printer test commands
+remain available. Use the command-specific --help for printing options.
+.SH EXIT STATUS
+Explicit run preserves normal shell exit codes. Errors and timeouts return 1.
+.SH FILES
+No default trust store is assumed; supply one explicitly. Images are exactly
+1024 bytes and new images have mode 0600.

@@ -31,7 +31,7 @@ gway rfid scan
 gway rfid normalize --uid 04:A1:B2:C3
 ```
 
-The repository currently ships a mock backend only. This is intentional: the first milestone establishes the package boundary and CI contract before moving the deployed hardware implementation.
+The repository includes mock and lazy-import MFRC522 backends, an observation-only service, and signed portable card codecs. The legacy Gway adapter commands above still select the mock backend.
 
 For a deterministic development scan:
 
@@ -93,3 +93,14 @@ jobs:
 ```
 
 All initial tests run against the mock backend and require no RFID hardware, GPIO, or SPI access.
+
+## Standalone shell command cards
+
+`gway-rfid command write`, `command inspect`, and explicit `command run` store
+and use complete signed POSIX shell programs on cards. The program is portable
+without a UID-to-script mapping. Inspection never executes; execution requires
+an explicit trusted-issuer directory and refuses root. The scanner service
+remains observation-only.
+
+See [shell-card format, examples and execution contract](docs/shell-cards.md)
+and `man gway-rfid`. Existing managed-argv cards and label printing are unchanged.
