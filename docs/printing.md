@@ -40,3 +40,14 @@ backend and device permissions. A successful job-build or dry run does not
 prove a printer is connected or will print correctly. No Gway runtime is
 required by the label commands. The remaining legacy RFID command-card
 workflow is a separate migration concern.
+
+## Experimental Linux USB transport
+
+Install the optional transport: `python -m pip install -e '.[printing,linux-printing]'`.
+Only use after identifying the printer's real VID/PID, bulk OUT endpoint, bus, and USB device address. The inherited VID/PID (`0483:5740`) is not a unique printer identity; device matching alone is insufficient. For example, **after** confirming the device interface:
+
+```sh
+gway-rfid label print --text "CARD 001" --printer phomemo-m220 --transport linux --endpoint 0x01 --bus 1 --address 2
+```
+
+The example endpoint and address are placeholders, **not verified M220 settings**. Without `--endpoint`, Linux printing refuses to send data. If device selection is ambiguous, it fails rather than selecting a random USB device. It does not detach kernel drivers or change permissions. Check `lsusb` and USB descriptors on the target machine; Linux hardware smoke testing, access permissions, and label feed/alignment are still outstanding.
