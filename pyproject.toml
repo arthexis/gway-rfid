@@ -21,6 +21,9 @@ dependencies = [
 gway-rfid = "gway_rfid.label_cli:main"
 
 [project.optional-dependencies]
+linux-printing = [
+  "pyusb>=1.2",
+]
 printing = [
   "Pillow>=10",
   "qrcode>=7.4",
