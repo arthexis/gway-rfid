@@ -13,7 +13,15 @@ card with a different UID, without copying an ID-to-command database.
 Authorization, balances, OCPP transaction policy, and other application state
 remain in their owning projects.
 
-## Design rules
+## Explicit shell-card extension (issue #22)
+
+The managed-argv design below remains distinct from the opt-in shell-card
+format. Literal shell programs use GWY1 flag 1, a domain-separated signed CBOR
+envelope and standalone write/inspect/explicit-run commands. The observation
+service does not execute either format. See [shell-cards.md](docs/shell-cards.md)
+for the implemented contract and physical-validation boundaries.
+
+## Design rules (managed-argv path)
 
 - There is one command-reading path. Do not expose separate quick-read,
   deep-read, or hold-to-read modes.

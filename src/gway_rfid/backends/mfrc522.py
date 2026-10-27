@@ -96,6 +96,27 @@ class MFRC522Reader:
         finally:
             reader.MFRC522_StopCrypto1()
 
+    def write_block(self, block: int, data: bytes, uid: bytes, *, key_type: str, key: bytes) -> None:
+        """Write one data block and authenticate/read it back; never write trailers."""
+        if key_type not in ("A", "B") or len(key) != 6:
+            raise ValueError("key_type must be A/B and key must be six bytes")
+        if not 1 <= block <= 63 or block % 4 == 3 or len(data) != 16:
+            raise ValueError("write requires a 16-byte data block, not manufacturer/trailer")
+        self.open()
+        reader = self._reader
+        mode = reader.PICC_AUTHENT1B if key_type == "B" else reader.PICC_AUTHENT1A
+        try:
+            if reader.MFRC522_Auth(mode, block, list(key), list(uid)) != reader.MI_OK:
+                raise OSError("RFID write authentication failed")
+            result = reader.MFRC522_Write(block, list(data))
+            # mfrc522 0.0.7 returns None even on success; readback is authoritative.
+            if result is not None and result != reader.MI_OK:
+                raise OSError("RFID block write failed")
+        finally:
+            reader.MFRC522_StopCrypto1()
+        if self.read_block(block, uid, key_type=key_type, key=key) != data:
+            raise OSError("RFID write readback failed")
+
     def status(self) -> dict[str, object]:
         return {"backend": self.name, "ready": self._reader is not None,
                 "bus": self.bus, "device": self.device, "reset_gpio": self.pin_rst}

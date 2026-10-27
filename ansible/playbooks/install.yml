@@ -78,6 +78,13 @@
         mode: preserve
       when: not rfid_existing.stat.exists
 
+    - name: Copy packaged command manual
+      ansible.builtin.copy:
+        src: "{{ rfid_source }}/docs/man/"
+        dest: "{{ rfid_release }}/docs/man/"
+        mode: preserve
+      when: not rfid_existing.stat.exists
+
     - name: Create commit-specific virtual environment
       ansible.builtin.command:
         argv: [python3, -m, venv, "{{ rfid_release }}/venv"]

@@ -48,3 +48,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["integration: requires Ansible and installs into a temporary directory"]
+
+[tool.setuptools.data-files]
+"share/man/man1" = ["docs/man/man1/gway-rfid.1"]
