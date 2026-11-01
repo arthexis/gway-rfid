@@ -5,6 +5,23 @@ if [ "$(id -u)" -eq 0 ]; then
   exit 1
 fi
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+# Pruning is explicit; no Ansible, service restart or package changes.
+if [ "${1:-}" = "--prune" ]; then
+  shift
+  exec python3 "$ROOT/scripts/release_prune.py" "$@"
+fi
+
+# Prevent installation and pruning from overlapping.
+state_dir="$HOME/.local/state/gway-rfid"
+[ ! -L "$HOME/.local/state" ] && [ ! -L "$state_dir" ] || {
+  echo "Unsafe deployment lock directory" >&2; exit 2;
+}
+(umask 077; mkdir -p "$state_dir")
+[ ! -L "$state_dir/deploy.lock" ] || { echo "Unsafe deployment lock" >&2; exit 2; }
+(umask 077; : >> "$state_dir/deploy.lock")
+exec 9<>"$state_dir/deploy.lock"
+flock -n 9 || { echo "Deployment/prune already running" >&2; exit 3; }
+
 # Skip only when the active immutable release matches HEAD and is healthy.
 if [ "$#" -eq 0 ]; then
   revision=$(git -C "$ROOT" rev-parse --verify HEAD)

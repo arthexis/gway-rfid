@@ -120,6 +120,36 @@
       register: rfid_unit
       when: rfid_manage_service | bool
 
+    - name: Inspect current release pointer for rollback
+      ansible.builtin.stat:
+        path: "{{ rfid_prefix }}/current"
+        follow: false
+      register: rfid_current_link
+
+    - name: Resolve current release before activation
+      ansible.builtin.command:
+        argv: [readlink, -f, "{{ rfid_prefix }}/current"]
+      register: rfid_old_release
+      changed_when: false
+      when: rfid_current_link.stat.islnk | default(false)
+
+    - name: Validate old release is managed
+      ansible.builtin.assert:
+        that:
+          - rfid_old_release.stdout is match('^' ~ (rfid_prefix | regex_escape) ~ '/releases/[a-f0-9]{40}$')
+      when: rfid_current_link.stat.islnk | default(false)
+
+    - name: Preserve previous release before upgrade
+      ansible.builtin.file:
+        src: "{{ rfid_old_release.stdout }}"
+        dest: "{{ rfid_prefix }}/previous"
+        state: link
+        force: true
+        follow: false
+      when:
+        - rfid_current_link.stat.islnk | default(false)
+        - rfid_old_release.stdout != rfid_release
+
     - name: Activate verified release
       ansible.builtin.file:
         src: "{{ rfid_release }}"
