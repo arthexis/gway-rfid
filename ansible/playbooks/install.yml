@@ -120,6 +120,63 @@
       register: rfid_unit
       when: rfid_manage_service | bool
 
+    - name: Inspect current release pointer for rollback
+      ansible.builtin.stat:
+        path: "{{ rfid_prefix }}/current"
+        follow: false
+      register: rfid_current_link
+
+    - name: Resolve current release before activation
+      ansible.builtin.command:
+        argv: [readlink, -f, "{{ rfid_prefix }}/current"]
+      register: rfid_old_release
+      changed_when: false
+      when: rfid_current_link.stat.islnk | default(false)
+
+    - name: Validate old release is managed
+      ansible.builtin.assert:
+        that:
+          - rfid_old_release.stdout is match('^' ~ (rfid_prefix | regex_escape) ~ '/releases/[a-f0-9]{40}      ansible.builtin.file:
+        src: "{{ rfid_release }}"
+        dest: "{{ rfid_prefix }}/current"
+        state: link
+        force: true
+        follow: false
+
+    - name: Enable and start RFID observation service
+      become: true
+      ansible.builtin.systemd_service:
+        name: gway-rfid.service
+        enabled: true
+        state: restarted
+        daemon_reload: true
+      when:
+        - rfid_manage_service | bool
+        - rfid_unit.changed or not rfid_existing.stat.exists
+
+    - name: Ensure existing RFID service is running
+      become: true
+      ansible.builtin.systemd_service:
+        name: gway-rfid.service
+        enabled: true
+        state: started
+      when:
+        - rfid_manage_service | bool
+        - not rfid_unit.changed and rfid_existing.stat.exists
+)
+      when: rfid_current_link.stat.islnk | default(false)
+
+    - name: Preserve previous release before upgrade
+      ansible.builtin.file:
+        src: "{{ rfid_old_release.stdout }}"
+        dest: "{{ rfid_prefix }}/previous"
+        state: link
+        force: true
+        follow: false
+      when:
+        - rfid_current_link.stat.islnk | default(false)
+        - rfid_old_release.stdout != rfid_release
+
     - name: Activate verified release
       ansible.builtin.file:
         src: "{{ rfid_release }}"
