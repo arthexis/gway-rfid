@@ -16,7 +16,7 @@ def test_exclusive_window_pauses_and_resumes_observer(tmp_path):
     with patch("gway_rfid.command_cli.os.open", return_value=71), \
          patch("gway_rfid.command_cli.os.close"), \
          patch("gway_rfid.command_cli.fcntl.flock"), \
-         patch("gway_rfid.command_cli.subprocess.run", return_value=Mock(stdout="123\\n")), \
+         patch("gway_rfid.command_cli.subprocess.run", return_value=Mock(stdout="123\n")), \
          patch("gway_rfid.command_cli.os.kill") as kill, \
          patch("gway_rfid.backends.mfrc522.MFRC522Reader", return_value=reader):
         with exclusive_reader_window():
@@ -32,7 +32,7 @@ def test_exclusive_window_resumes_after_exception():
     with patch("gway_rfid.command_cli.os.open", return_value=71), \
          patch("gway_rfid.command_cli.os.close"), \
          patch("gway_rfid.command_cli.fcntl.flock"), \
-         patch("gway_rfid.command_cli.subprocess.run", return_value=Mock(stdout="123\\n")), \
+         patch("gway_rfid.command_cli.subprocess.run", return_value=Mock(stdout="123\n")), \
          patch("gway_rfid.command_cli.os.kill") as kill, \
          patch("gway_rfid.backends.mfrc522.MFRC522Reader", return_value=reader):
         with pytest.raises(ValueError):
