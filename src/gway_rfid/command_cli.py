@@ -3,6 +3,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import fcntl
+import os
+import signal
+import subprocess
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -56,11 +61,50 @@ def transport(args):
     if len(key) != 6:
         raise ValueError("card access key file must contain exactly six bytes")
     from .backends.mfrc522 import MFRC522Reader
-    with MFRC522Reader() as reader:
-        tag = reader.scan()
-        if tag is None:
-            raise RuntimeError("no card present; place a card and retry")
-        yield SelectedCard(reader, tag.uid, key=key, key_type=args.card_key_type)
+    with exclusive_reader_window():
+        with MFRC522Reader() as reader:
+            tag = reader.scan()
+            if tag is None:
+                raise RuntimeError("no card present; place a card and retry")
+            yield SelectedCard(reader, tag.uid, key=key, key_type=args.card_key_type)
+
+
+@contextmanager
+def exclusive_reader_window():
+    """Coordinate with the observer; never silently compete for the SPI device."""
+    lock_path = "/run/lock/gway-rfid-exclusive.lock"
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_CLOEXEC, 0o600)
+    pid = None
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = subprocess.run(
+            ["systemctl", "show", "gway-rfid.service", "--property=MainPID", "--value"],
+            capture_output=True, text=True, timeout=5, check=True,
+        )
+        pid_text = result.stdout.strip()
+        pid = int(pid_text) if pid_text.isdecimal() else 0
+        if pid:
+            os.kill(pid, signal.SIGUSR1)
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                probe = MFRC522Reader()
+                try:
+                    probe._acquire_lock()
+                    break
+                except RuntimeError:
+                    time.sleep(0.1)
+                finally:
+                    probe.close()
+            else:
+                raise TimeoutError("observer did not release the RFID reader")
+        yield
+    finally:
+        if pid:
+            try:
+                os.kill(pid, signal.SIGUSR2)
+            except ProcessLookupError:
+                pass
+        os.close(fd)
 
 
 def run(args: argparse.Namespace) -> int:
