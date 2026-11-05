@@ -97,8 +97,7 @@ reports `verified: false`. Inspection never executes.
 
 During an approved exclusive-reader window, use a disposable Classic 1K card.
 Replace `--image /tmp/command-card.bin` with `--reader mfrc522`. Physical writes
-also require `--overwrite`. The existing SPI advisory lock prevents competing
-cooperating readers; these tools never stop or restart another reader service.
+also require `--overwrite`. The existing SPI advisory lock prevents competing cooperating readers. When the\nobserver is running, physical operations request a bounded cooperative pause\n(SIGUSR1), wait for the SPI lock to be released, and request resume (SIGUSR2)\nin a cleanup handler. A separate exclusive-operation lock prevents concurrent\nwriters. The observer automatically resumes after its pause timeout once the\nexclusive-operation lock is no longer held, including after an abruptly\nterminated writer. The CLI user must be permitted to signal the observer;\nimage-only operations do not interact with systemd. No service is stopped or\nrestarted. A writer should still avoid lengthy interactive operations while\nholding the physical reader.
 There is one immediate card-selection attempt; no card present returns an error.
 Remove the card only after successful write/readback.
 
