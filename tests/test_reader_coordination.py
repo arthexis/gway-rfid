@@ -2,7 +2,7 @@
 import os
 import signal
 import subprocess
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import pytest
 
@@ -22,8 +22,8 @@ def test_exclusive_window_pauses_and_resumes_observer(tmp_path):
         with exclusive_reader_window():
             pass
     assert kill.call_args_list == [
-        ((123, signal.SIGUSR1),),
-        ((123, signal.SIGUSR2),),
+        call(123, signal.SIGUSR1),
+        call(123, signal.SIGUSR2),
     ]
 
 
