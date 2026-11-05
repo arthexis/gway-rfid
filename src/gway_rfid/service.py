@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
+import os
 import json
 import logging
 import signal
@@ -42,7 +44,17 @@ def run(*, interval: float = 0.15, reader: object | None = None) -> None:
         device.open()
         LOG.info("RFID reader opened")
         while not stopping:
-            if pause_until > time.monotonic():
+            writer_active = False
+            if paused and pause_until <= time.monotonic():
+                fd = os.open("/run/lock/gway-rfid-exclusive.lock", os.O_CREAT | os.O_RDWR | os.O_CLOEXEC, 0o600)
+                try:
+                    try:
+                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError:
+                        writer_active = True
+                finally:
+                    os.close(fd)
+            if pause_until > time.monotonic() or writer_active:
                 if not paused:
                     device.close()
                     paused = True
