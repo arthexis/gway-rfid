@@ -74,6 +74,7 @@ def exclusive_reader_window():
     """Coordinate with the observer; never silently compete for the SPI device."""
     lock_path = "/run/lock/gway-rfid-exclusive.lock"
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_CLOEXEC, 0o600)
+    from .backends.mfrc522 import MFRC522Reader
     pid = None
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -82,7 +83,9 @@ def exclusive_reader_window():
             capture_output=True, text=True, timeout=5, check=True,
         )
         pid_text = result.stdout.strip()
-        pid = int(pid_text) if pid_text.isdecimal() else 0
+        if not pid_text.isdecimal():
+            raise RuntimeError("invalid RFID observer PID")
+        pid = int(pid_text)
         if pid:
             os.kill(pid, signal.SIGUSR1)
             deadline = time.monotonic() + 10
