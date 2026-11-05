@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
+import os
 import json
 import logging
 import signal
@@ -17,11 +19,23 @@ def run(*, interval: float = 0.15, reader: object | None = None) -> None:
     if interval <= 0:
         raise ValueError("interval must be positive")
     stopping = False
+    pause_until = 0.0
+    paused = False
 
     def stop(_signum: int, _frame: object) -> None:
         nonlocal stopping
         stopping = True
 
+    def pause(_signum: int, _frame: object) -> None:
+        nonlocal pause_until
+        pause_until = time.monotonic() + 45.0
+
+    def resume(_signum: int, _frame: object) -> None:
+        nonlocal pause_until
+        pause_until = 0.0
+
+    signal.signal(signal.SIGUSR1, pause)
+    signal.signal(signal.SIGUSR2, resume)
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     device = reader if reader is not None else MFRC522Reader()
@@ -30,6 +44,28 @@ def run(*, interval: float = 0.15, reader: object | None = None) -> None:
         device.open()
         LOG.info("RFID reader opened")
         while not stopping:
+            writer_active = False
+            if paused and pause_until <= time.monotonic():
+                fd = os.open("/run/lock/gway-rfid-exclusive.lock", os.O_CREAT | os.O_RDWR | os.O_CLOEXEC, 0o600)
+                try:
+                    try:
+                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError:
+                        writer_active = True
+                finally:
+                    os.close(fd)
+            if pause_until > time.monotonic() or writer_active:
+                if not paused:
+                    device.close()
+                    paused = True
+                    LOG.info("RFID reader temporarily released for exclusive operation")
+                time.sleep(interval)
+                continue
+            if paused:
+                device.open()
+                tracker = PresenceTracker()
+                paused = False
+                LOG.info("RFID reader resumed")
             for event in tracker.observe(device.scan(), time.monotonic()):
                 if event.kind == "scanned":
                     LOG.info("rfid.scanned %s", json.dumps({"uid": event.uid, "generation": event.generation}))
